@@ -1,3 +1,4 @@
+import aioredis
 from sqlalchemy import select, delete, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 import schemas
@@ -69,3 +70,20 @@ async def delete_expired_links(db: AsyncSession):
         )
     )
     await db.commit()
+
+
+async def cache_popular_links(db: AsyncSession, redis: aioredis.Redis, limit: int = 100):
+    # Получаем топ-N популярных ссылок
+    popular_links = await db.execute(
+        select(models.Link)
+        .order_by(models.Link.clicks.desc())
+        .limit(limit)
+    )
+
+    # Кэшируем их на 24 часа
+    for link in popular_links.scalars():
+        await redis.setex(
+            f"popular:{link.short_code}",
+            86400,  # TTL 24 часа
+            link.original_url
+        )
