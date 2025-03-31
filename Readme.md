@@ -8,4 +8,5 @@
 Подключался к ней также через dBeaver:
 ![image](https://github.com/user-attachments/assets/700fb4c7-c36a-4dad-9b90-60883751845c)
 
-Postgres и redis поднимал через docker, сам сервис - тоже
+Postgres и redis поднимал через docker, сам сервис - тоже. Dockerfile и dockercompose.yaml приложены в репозитории.
+
