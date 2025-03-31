@@ -1,89 +1,93 @@
-import aioredis
-from sqlalchemy import select, delete, or_, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-import schemas
-import models
-import secrets
-import string
+import pytest
+from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
+import aioredis
+from app import crud, models, schemas
 
 
-def generate_short_code(length = 6):
-    chars = string.ascii_letters + string.digits
-    return "".join(secrets.choice(chars) for _ in range(length))
+@pytest.mark.asyncio
+async def test_generate_short_code():
+    code1 = crud.generate_short_code()
+    code2 = crud.generate_short_code()
+    assert len(code1) == 6
+    assert code1 != code2  # Проверка уникальности
 
 
-
-async def create_link(db: AsyncSession, link: schemas.LinkCreate):
-    short_code = link.custom_alias or generate_short_code()
-    new_link = models.Link(
-        original_url = str(link.original_url),
-        short_code = short_code,
-        expires_at = link.expires_at,
-        custom_alias = link.custom_alias
+@pytest.mark.asyncio
+async def test_create_link_with_custom_alias(mock_db: AsyncSession):
+    link_data = schemas.LinkCreate(
+        original_url="https://example.com",
+        custom_alias="custom"
     )
+    mock_db.commit = AsyncMock()
 
-    db.add(new_link)
-    await db.commit()
-    await db.refresh(new_link)
-    return {"short_code": short_code}
-
-async def get_link_by_short_code(db: AsyncSession, short_code: str ):
-    query = await db.execute(select(models.Link).where(models.Link.short_code == short_code))
-    return query.scalar_one_or_none()
-
-async def get_link_deleted(db:AsyncSession, short_code: str ):
-    result = await db.execute(select(models.Link).where(models.Link.short_code == short_code))
-    link = result.scalar_one_or_none()
-
-    if link:
-        await db.delete(link)
-        await db.commit()
-
-async def get_link_by_origin(db: AsyncSession, original_url = str):
-    query = await db.execute(select(models.Link).where(models.Link.original_url.contains(original_url)))
-    return query.scalars().all()
+    result = await crud.create_link(mock_db, link_data)
+    assert result["short_code"] == "custom"
 
 
-async def update_link_clicks(db: AsyncSession, link: models.Link):
-    link.clicks +=1
-    link.last_accessed_at = datetime.utcnow().date()
-    await db.commit()
-    return link
+@pytest.mark.asyncio
+async def test_create_link_with_auto_generated_code(mock_db: AsyncSession):
+    link_data = schemas.LinkCreate(original_url="https://example.com")
+    mock_db.commit = AsyncMock()
 
-async def update_link(db: AsyncSession, short_code: str, new_url: str ):
-    result = await db.execute(select(models.Link).where(models.Link.short_code == short_code))
-    result.original_url = new_url
-    await db.commit()
+    result = await crud.create_link(mock_db, link_data)
+    assert len(result["short_code"]) == 6
 
-async def delete_expired_links(db: AsyncSession):
-    now = datetime.utcnow().date()
-    await db.execute(
-        delete(models.Link).where(
-            or_(
-                models.Link.expires_at <= now,
-                and_(
-                    models.Link.last_accessed_at.is_not(None),
-                    models.Link.last_accessed_at <= now - timedelta(days=90)
-                )
-            )
-        )
+
+@pytest.mark.asyncio
+async def test_get_link_by_short_code(mock_db: AsyncSession):
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = models.Link(
+        short_code="test123",
+        original_url="https://example.com"
     )
-    await db.commit()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    link = await crud.get_link_by_short_code(mock_db, "test123")
+    assert link.short_code == "test123"
 
 
-async def cache_popular_links(db: AsyncSession, redis: aioredis.Redis, limit: int = 100):
-    # Получаем топ-N популярных ссылок
-    popular_links = await db.execute(
-        select(models.Link)
-        .order_by(models.Link.clicks.desc())
-        .limit(limit)
-    )
+@pytest.mark.asyncio
+async def test_delete_link(mock_db: AsyncSession):
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = models.Link(short_code="test123")
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.commit = AsyncMock()
 
-    # Кэшируем их на 24 часа
-    for link in popular_links.scalars():
-        await redis.setex(
-            f"popular:{link.short_code}",
-            86400,  # TTL 24 часа
-            link.original_url
-        )
+    await crud.get_link_deleted(mock_db, "test123")
+    mock_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_link_clicks(mock_db: AsyncSession):
+    test_link = models.Link(clicks=0)
+    mock_db.commit = AsyncMock()
+
+    updated = await crud.update_link_clicks(mock_db, test_link)
+    assert updated.clicks == 1
+    assert updated.last_accessed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_expired_links(mock_db: AsyncSession):
+    mock_db.execute = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    await crud.delete_expired_links(mock_db)
+    mock_db.execute.assert_called_once()
+    mock_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cache_popular_links(mock_db: AsyncSession, mock_redis: aioredis.Redis):
+    mock_result = MagicMock()
+    mock_result.scalars.return_value = [
+        models.Link(short_code="popular1", original_url="https://example.com/1", clicks=100),
+        models.Link(short_code="popular2", original_url="https://example.com/2", clicks=50)
+    ]
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_redis.setex = AsyncMock()
+
+    await crud.cache_popular_links(mock_db, mock_redis)
+    assert mock_redis.setex.await_count == 2
