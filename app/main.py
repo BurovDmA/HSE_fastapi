@@ -19,15 +19,23 @@ app = FastAPI()
 async def daily_cleanup():
     while True:
         now = datetime.now()
-        # Вычисляем время до следующего запуска (3:00 утра)
         next_run = datetime.combine(now.date(), time(3, 0))
         if now > next_run:
             next_run += timedelta(days=1)
 
-        wait_seconds = (next_run - now).total_seconds()
-        await asyncio.sleep(wait_seconds)
+        await asyncio.sleep((next_run - now).total_seconds())
 
-        await crud.delete_expired_links(database.get_db)
+        async with database.get_db() as db:
+            # 1. Удаляем просроченные ссылки
+            await crud.delete_expired_links(db)
+
+
+            redis = await database.get_redis().__anext__()
+            await crud.cache_popular_links(db, redis)
+
+
+            await redis.delete(*await redis.keys("stats:*"))
+
 
 
 @app.on_event("startup")
