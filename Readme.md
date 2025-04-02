@@ -10,3 +10,4 @@
 
 Postgres и redis поднимал через docker, сам сервис - тоже. Dockerfile и dockercompose.yaml приложены в репозитории.
 
+![image](https://github.com/user-attachments/assets/f1fdf464-2d61-4cbb-941e-431190314b1d)
