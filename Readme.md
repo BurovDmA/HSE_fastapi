@@ -9,5 +9,5 @@
 ![image](https://github.com/user-attachments/assets/700fb4c7-c36a-4dad-9b90-60883751845c)
 
 Postgres и redis поднимал через docker, сам сервис - тоже. Dockerfile и dockercompose.yaml приложены в репозитории.
-
+Весь проект поднимается командой: docker-compose up -d
 ![image](https://github.com/user-attachments/assets/f1fdf464-2d61-4cbb-941e-431190314b1d)
